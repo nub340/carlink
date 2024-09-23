@@ -81,7 +81,31 @@ std::map<unsigned long, CanMessage> canMessages;
 // Define a set of CAN IDs you are interested in
 std::unordered_set<unsigned long> canMessageIdsToPublish = { 0x126 };
 
-void setup() {
+enum CommandID {
+  CMD_READ_DATA = 1,
+  CMD_UNLOCK_DOORS,
+  CMD_LOCK_DOORS,
+  CMD_ROLL_WINDOWS_DOWN,
+  CMD_ROLL_WINDOWS_UP,
+  CMD_VENT_WINDOWS,
+  CMD_TURN_ON_HVAC,
+  CMD_TURN_OFF_HVAC,
+  CMD_HONK,
+  CMD_OPEN_SUNROOF,
+  CMD_CLOSE_SUNROOF,
+  CMD_TILT_SUNROOF,
+  CMD_UNTILT_SUNROOF,
+  CMD_FRONT_DEFROST,
+  CMD_REAR_DEFROST
+};
+
+struct Command {
+  CommandID id;
+  String params;
+};
+
+void
+setup() {
   Serial.begin(115200);
   while (!Serial)
     delay(10);
@@ -109,7 +133,7 @@ void setup() {
       ;
   }
 
-  mqttQueue = xQueueCreate(10, sizeof(CanMessage));
+  mqttQueue = xQueueCreate(100, sizeof(CanMessage));
 
   // Create a task for publishing to MQTT
   xTaskCreatePinnedToCore(
@@ -214,21 +238,21 @@ void MQTTTask(void* pvParameters) {
         connectToAWS();
       }
 
-      Serial.print("Free heap before publish: ");
-      Serial.println(ESP.getFreeHeap());
+      // Serial.print("Free heap before publish: ");
+      // Serial.println(ESP.getFreeHeap());
 
       //Publish a test message
       Serial.print("publishing message: ");
       Serial.println(payload.c_str());
-      if (mqttClient.publish("car/out", "test")) {
+      if (mqttClient.publish("car/out", payload.c_str())) {
         Serial.println(" succeeded!");
       } else {
         Serial.println(" failed.");
       }
       yield();  // Yield CPU control to other tasks
 
-      Serial.print("Free heap after publish: ");
-      Serial.println(ESP.getFreeHeap());
+      // Serial.print("Free heap after publish: ");
+      // Serial.println(ESP.getFreeHeap());
 
       lastPublishTime = millis();
     }
@@ -305,8 +329,7 @@ bool setupAWSIoT() {
 
   mqttClient.setKeepAlive(60);
   mqttClient.setServer(awsEndpoint, port);
-  //mqttClient.setCallback(mqttCallback);
-  //mqttClient.setDebugOutput(true);
+  mqttClient.setCallback(mqttCallback);
 
   return true;
 }
@@ -317,7 +340,7 @@ bool connectToAWS() {
     if (mqttClient.connect("ESP32_DevModule")) {
       Serial.print("Connected to AWS IoT Core endpoint: ");
       Serial.println(awsEndpoint);
-      //mqttClient.subscribe("car/in");
+      mqttClient.subscribe("car/in");
     } else {
       Serial.print("Failed to connect. Error state=");
       Serial.println(mqttClient.state());
@@ -336,7 +359,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.print((char)payload[i]);
   }
   Serial.println();
-  rollWindowDown();
+
+  Command cmd;
+  cmd.id = CMD_ROLL_WINDOWS_DOWN;
+  processRemoteCommand(cmd);
 }
 
 void displayCANErrors() {
@@ -368,6 +394,14 @@ void displayCANErrors() {
     }
   } else {
     //Serial.println("No Errors Detected.");
+  }
+}
+
+void processRemoteCommand(Command cmd) {
+  switch (cmd.id) {
+    case CMD_ROLL_WINDOWS_DOWN:
+      rollWindowDown();
+      break;
   }
 }
 
