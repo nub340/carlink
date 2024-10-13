@@ -35,7 +35,7 @@
 #define SerialAT Serial1
 
 // analog relay pins
-#define DOOR1_WINUP_RELAY 0
+#define DOOR1_WINUP_RELAY 12
 #define DOOR1_WINDWN_RELAY 25
 
 #define DOOR2_WINUP_RELAY 32
@@ -265,7 +265,13 @@ bool setupAWSIoT() {
 }
 
 bool connectToAWSIoT() {
-  Serial.print(F("Connecting to AWS IoT Core..."));
+  Serial.println(F("Connecting to AWS IoT Core..."));
+  if (!modem.isNetworkConnected()) {
+    Serial.println(F("Modem is disconnected, reconnecting..."));
+    // Attempt to reconnect
+    modem.restart();
+    // Re-initiate connection
+  }
   while (!mqttClient.connected()) {
     isConnectedToAWSIoT = false;
     if (mqttClient.connect("ESP32_DevModule")) {
@@ -273,9 +279,9 @@ bool connectToAWSIoT() {
       Serial.println(awsEndpoint);
       mqttClient.subscribe("car/in");
     } else {
-      Serial.print(F(" Failed! Error state="));
+      Serial.print(F("Failed! Error state="));
       Serial.print(mqttClient.state());
-      Serial.print(". Retrying...");
+      Serial.println(". Retrying...");
       delay(5000);
     }
   }
@@ -284,6 +290,7 @@ bool connectToAWSIoT() {
 }
 
 bool InitializeCANTransceiver() {
+
   // Initialize MCP2515 CAN controller at 500kbps speed
   Serial.println(F("Initializing MCP2515 CAN tranceiver..."));
   SPI.begin(CAN_SCK, CAN_MISO, CAN_MOSI, CAN_CS);
@@ -341,17 +348,17 @@ void loop() {
       connectToAWSIoT();
     }
 
-    updateVehicleShadow("closed", 98.2, motorTemperature, motorTemperature);
+    //updateVehicleShadow("closed", 98.2, motorTemperature, motorTemperature);
 
     //Publish a test message
-    // Serial.print(F("publishing message: "));
-    // Serial.print(mqttMsg);
+    Serial.print(F("publishing message: "));
+    Serial.print(mqttMsg);
 
-    // if (mqttClient.publish("car/out", mqttMsg)) {
-    //   Serial.println(F(" succeeded!"));
-    // } else {
-    //   Serial.println(F(" failed."));
-    // }
+    if (mqttClient.publish("car/out", mqttMsg)) {
+      Serial.println(F(" succeeded!"));
+    } else {
+      Serial.println(F(" failed."));
+    }
 
     lastPublishTime = millis();
   }
