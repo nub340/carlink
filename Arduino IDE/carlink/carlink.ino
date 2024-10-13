@@ -102,6 +102,7 @@ SemaphoreHandle_t canMessagesMutex;
 struct CanMessage {
   unsigned long id;
   std::vector<uint8_t> data;
+  unsigned long timestamp;
 };
 
 // Data structure to store CAN messages
@@ -153,11 +154,11 @@ void setup() {
   pinMode(DOOR2_WINUP_RELAY, OUTPUT);
   pinMode(DOOR2_WINDWN_RELAY, OUTPUT);
 
-  pinMode(SUNROOF_OPEN_RELAY, OUTPUT);
-  pinMode(SUNROOF_CLOSE_RELAY, OUTPUT);
+  // pinMode(SUNROOF_OPEN_RELAY, OUTPUT);
+  // pinMode(SUNROOF_CLOSE_RELAY, OUTPUT);
 
-  pinMode(SUNROOF_TILT_RELAY, OUTPUT);
-  pinMode(SUNROOF_UNTILT_RELAY, OUTPUT);
+  // pinMode(SUNROOF_TILT_RELAY, OUTPUT);
+  // pinMode(SUNROOF_UNTILT_RELAY, OUTPUT);
 
   isCarlinkSetupSuccessful = loadCertificates() && setupModem() && setupAWSIoT() && connectToAWSIoT() && InitializeCANTransceiver();
 
@@ -319,7 +320,7 @@ void loop() {
   }
 #endif
 
-  if (millis() - lastPublishTime >= publishInterval && canMessages.size() > 0) {
+  if (canMessages.size() > 0 && millis() - lastPublishTime >= publishInterval && canMessages[0x126].timestamp > lastPublishTime) {
 
     std::map<unsigned long, CanMessage> snapshot;
     if (xSemaphoreTake(canMessagesMutex, portMAX_DELAY) == pdTRUE) {
@@ -383,6 +384,7 @@ void CANTask(void* pvParameters) {
       CanMessage message;
       message.id = rxId;
       message.data.assign(rxBuf, rxBuf + len);
+      message.timestamp = millis();
 
       // Update the message in the map (store the latest message)
       if (xSemaphoreTake(canMessagesMutex, portMAX_DELAY) == pdTRUE) {
