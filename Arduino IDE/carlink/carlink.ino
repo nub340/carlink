@@ -146,12 +146,8 @@ void setup() {
   Serial.println();
   Serial.println(F("Begin setup..."));
 
-  // Why am I doing this again?
-  // pinMode(0, OUTPUT);
-  // digitalWrite(0, LOW);
-
   // relay pins
-  //pinMode(DOOR1_WINUP_RELAY, OUTPUT);
+  pinMode(DOOR1_WINUP_RELAY, OUTPUT);
   pinMode(DOOR1_WINDWN_RELAY, OUTPUT);
 
   pinMode(DOOR2_WINUP_RELAY, OUTPUT);
@@ -514,14 +510,12 @@ void rollWindowDown(int doorNum = 1, int ms = WINDOW_UPDOWN_DELAY) {
     return;
   }
 
-  Serial.print(F("Rolling window down..."));
-  digitalWrite(DOOR1_WINUP_RELAY, false);
-  digitalWrite(DOOR1_WINDWN_RELAY, true);
-  Serial.println(digitalRead(DOOR1_WINDWN_RELAY));
+  Serial.print("Rolling window " + String(doorNum) + " down...");
+  digitalWrite(upPin, false);
+  digitalWrite(downPin, true);
   delay(ms);
-  digitalWrite(DOOR1_WINDWN_RELAY, false);
+  digitalWrite(downPin, false);
   Serial.println(F("done."));
-  Serial.println(digitalRead(DOOR1_WINDWN_RELAY));
 }
 
 void rollWindowUp(int doorNum = 1, int ms = WINDOW_UPDOWN_DELAY) {
@@ -538,25 +532,24 @@ void rollWindowUp(int doorNum = 1, int ms = WINDOW_UPDOWN_DELAY) {
     return;
   }
 
-  Serial.print(F("Rolling window up..."));
-  digitalWrite(DOOR1_WINDWN_RELAY, false);
-  digitalWrite(DOOR1_WINUP_RELAY, true);
-  Serial.println(digitalRead(DOOR1_WINUP_RELAY));
+  Serial.print("Rolling window " + String(doorNum) + " up...");
+  digitalWrite(downPin, false);
+  digitalWrite(upPin, true);
   delay(ms);
-  digitalWrite(DOOR1_WINUP_RELAY, false);
+  digitalWrite(upPin, false);
   Serial.println(F("done."));
-  Serial.println(digitalRead(DOOR1_WINUP_RELAY));
 }
 
-void ventWindow(int ms = WINDOW_VENT_DELAY) {
-  Serial.print(F("Venting window..."));
-  rollWindowUp();
+void ventWindow(int doorNum = 1, int ms = WINDOW_VENT_DELAY) {
+  Serial.print("Venting window " + String(doorNum) + "...");
+  rollWindowUp(doorNum);
   delay(1000);
-  rollWindowDown(ms);
+  rollWindowDown(doorNum, ms);
+  Serial.println(F("done."));
 }
 
 void toggleWindow(int doorNum = 1) {
-  Serial.print(F("Toggling windw state. Currently: "));
+  Serial.print("Toggling window " + String(doorNum) + " state. Currently: ");
   Serial.println(isWindowDown);
   if (isWindowDown) {
     rollWindowUp(doorNum);
@@ -569,21 +562,26 @@ void toggleWindow(int doorNum = 1) {
 void processCommand(Command cmd) {
   switch (cmd.id) {
     case CMD_ROLL_WINDOWS_DOWN:
-      rollWindowDown();
+      rollWindowDown(getDoorNumFromCommandParams(cmd));
       break;
 
     case CMD_ROLL_WINDOWS_UP:
-      rollWindowUp();
+      rollWindowUp(getDoorNumFromCommandParams(cmd));
       break;
 
     case CMD_TOGGLE_WINDOW:
-      toggleWindow();
+      toggleWindow(getDoorNumFromCommandParams(cmd));
       break;
 
     case CMD_VENT_WINDOWS:
-      ventWindow();
+      ventWindow(getDoorNumFromCommandParams(cmd));
       break;
   }
+}
+
+int getDoorNumFromCommandParams(Command cmd) {
+  Serial.println(cmd.params);
+  return cmd.params.toInt();
 }
 
 //= Utility functions ===========================
