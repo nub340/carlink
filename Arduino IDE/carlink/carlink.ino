@@ -15,6 +15,13 @@
 #include <map>
 #include <unordered_set>
 #include <ArduinoJson.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+
+// UUIDs for the BLE Service and Characteristics
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+#define CHARACTERISTIC_UUID "12345678-1234-5678-1234-56789abcdef1"
 
 // Define the CS and INT pins
 #define CAN_CS 15  // Choose a free GPIO for CS
@@ -56,6 +63,11 @@
 
 #define MQTT_MAX_PACKET_SIZE 512  // Increase packet size if needed
 #define MQTT_DEBUG
+
+BLECharacteristic* pCharacteristic;
+bool deviceConnected = false;
+bool isBluetoothInitialized = false;
+std::string receivedValue;
 
 char ca_cert[CERT_BUF_SIZE];
 char client_cert[CERT_BUF_SIZE];
@@ -137,6 +149,17 @@ struct Command {
   String params;
 };
 
+class BTCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* pCharacteristic) {
+    receivedValue = pCharacteristic->getValue();
+    if (receivedValue.length() > 0) {
+      Serial.print("Received Value: ");
+      Serial.println(receivedValue.c_str());
+    }
+  }
+};
+
+
 //= Setup functions =============================
 void setup() {
   Serial.begin(115200);
@@ -154,12 +177,10 @@ void setup() {
   pinMode(DOOR2_WINUP_RELAY, OUTPUT);
   pinMode(DOOR2_WINDWN_RELAY, OUTPUT);
 
-  // pinMode(SUNROOF_OPEN_RELAY, OUTPUT);
-  // pinMode(SUNROOF_CLOSE_RELAY, OUTPUT);
+  // Initialize BLE
+  isBluetoothInitialized = initializeBluetooth();
 
-  // pinMode(SUNROOF_TILT_RELAY, OUTPUT);
-  // pinMode(SUNROOF_UNTILT_RELAY, OUTPUT);
-
+  // Initialize cellular connectivity
   isCarlinkSetupSuccessful = loadCertificates() && setupModem() && setupAWSIoT() && connectToAWSIoT() && InitializeCANTransceiver();
 
   canMessagesMutex = xSemaphoreCreateMutex();
@@ -309,6 +330,34 @@ bool InitializeCANTransceiver() {
   CAN.init_Filt(1, 0, 0x126);
 
   return true;
+}
+
+bool initializeBluetooth() {
+  BLEDevice::init("ESP32 BLE Device");
+  BLEServer* pServer = BLEDevice::createServer();
+
+  // Create the BLE Service
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  // Create a BLE Characteristic
+  pCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+
+  pCharacteristic->setCallbacks(new BTCallbacks());
+
+  // Start the service
+  pService->start();
+
+  // Start advertising
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // Functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  Serial.println("Waiting for a client connection...");
 }
 
 //= Run functions ===============================
