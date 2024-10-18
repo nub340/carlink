@@ -279,6 +279,7 @@ bool connectToAWSIoT() {
       Serial.print(F("Failed! Error state="));
       Serial.print(mqttClient.state());
       Serial.println(". Retrying...");
+      setupAWSIoT();
       delay(5000);
     }
   }
