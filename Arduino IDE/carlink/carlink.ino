@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+
 // Define modem type before including TinyGsmClient
 #define TINY_GSM_MODEM_SIM7000
 
@@ -15,6 +16,7 @@
 #include <map>
 #include <unordered_set>
 #include <ArduinoJson.h>
+#include "PCF8575.h"
 
 // Define the CS and INT pins
 #define CAN_CS 15  // Choose a free GPIO for CS
@@ -83,6 +85,7 @@ unsigned long lastDisplayErrorsTime = 0;
 unsigned long lastPublishTime = 0;
 unsigned long publishInterval = 5000;
 bool isWindowDown = false;
+unsigned long lastCheckIfOnlineTime = 0;
 
 MCP_CAN CAN(CAN_CS);  // Create CAN object with CS pin
 
@@ -97,6 +100,10 @@ PubSubClient mqttClient(secureGsmClient);
 //QueueHandle_t mqttQueue;
 SemaphoreHandle_t canMessagesMutex;
 //SemaphoreHandle_t awsConnectredFlagMutex;
+
+// Set i2c address for relay board
+PCF8575 pcf8575(0x27);
+byte pin_mas[] = {P0, P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15};
 
 // Structure to hold raw CAN data for MQTT publishing
 struct CanMessage {
@@ -123,6 +130,7 @@ enum CommandID {
   CMD_TURN_ON_HVAC,
   CMD_TURN_OFF_HVAC,
   CMD_HONK,
+  CMD_FLASH_LIGHTS,
   CMD_OPEN_SUNROOF,
   CMD_CLOSE_SUNROOF,
   CMD_TILT_SUNROOF,
@@ -160,7 +168,7 @@ void setup() {
   // pinMode(SUNROOF_TILT_RELAY, OUTPUT);
   // pinMode(SUNROOF_UNTILT_RELAY, OUTPUT);
 
-  isCarlinkSetupSuccessful = loadCertificates() && setupModem() && setupAWSIoT() && connectToAWSIoT() && InitializeCANTransceiver();
+  isCarlinkSetupSuccessful = setupRelayBoard() && loadCertificates() && setupModem() && setupAWSIoT() && connectToAWSIoT() && InitializeCANTransceiver();
 
   canMessagesMutex = xSemaphoreCreateMutex();
   lastPublishTime = millis();
@@ -181,6 +189,29 @@ void setup() {
   } else {
     Serial.println(F("Carlink offline! :("));
   }
+}
+
+bool setupRelayBoard() {
+  unsigned char i;
+  // Set pinMode to OUTPUT
+  for (i=0;i<16;i++) { pcf8575.pinMode(i, OUTPUT); }
+
+  
+  // Set high level on each output pin
+  for (i=0;i<16;i++) {  pcf8575.digitalWrite(i, HIGH); }
+ 
+  pcf8575.begin();
+//  delay(500);
+//  while(!pcf8575.isConnected()) {
+//    int lastError = pcf8575.lastError();
+//    if(lastError > 0){
+//      Serial.println("error: " + String(lastError));
+//    }
+//    Serial.println("Waiting for I2C relay board...");
+//    delay(500);
+//  }
+  Serial.println("I2C relay board connected!");
+  return true;
 }
 
 bool loadCertificates() {
@@ -361,7 +392,39 @@ void loop() {
     lastPublishTime = millis();
   }
 
+//  if(millis() - lastPublishTime >= publishInterval) {
+//    Serial.print(F("Publishing device shadow..."));
+//    String payload = "{ \"state\": { \"reported\": { \"temperature\": " + String(65) +
+//                         ", \"batteryLevel\": " + String(76) + " } } }";
+//    if (mqttClient.publish("$aws/things/ESP32_DevModule/shadow/update", payload.c_str())) {
+//      Serial.println(F(" succeeded!"));
+//    } else {
+//      Serial.println(F(" failed."));
+//      printConnectionStatus();
+//      if(!mqttClient.connected()) {
+//        connectToAWSIoT();
+//      }
+//    }
+//    lastPublishTime = millis();
+//  }
+
+  // Check connection every 5 minutes
+  if(millis() - lastCheckIfOnlineTime >= 300000) {
+    printConnectionStatus();
+    lastCheckIfOnlineTime = millis();  
+  }
+
   mqttClient.loop();
+}
+
+void printConnectionStatus() {
+  Serial.print("Modem IsNetworkConnected: ");
+  Serial.print(modem.isNetworkConnected());
+  Serial.print(", Modem GPRS Connected: ");
+  Serial.print(modem.isGprsConnected());
+  Serial.print(", MQTT Broker Connected: ");
+  Serial.print(mqttClient.connected());
+  Serial.println();
 }
 
 /* Handle processing off CAN BUS messages */
@@ -489,6 +552,7 @@ const char* commandIDToString(CommandID cmd) {
     case CMD_TURN_ON_HVAC: return "CMD_TURN_ON_HVAC";
     case CMD_TURN_OFF_HVAC: return "CMD_TURN_OFF_HVAC";
     case CMD_HONK: return "CMD_HONK";
+    case CMD_FLASH_LIGHTS: return "CMD_FLASH_LIGHTS";
     case CMD_OPEN_SUNROOF: return "CMD_OPEN_SUNROOF";
     case CMD_CLOSE_SUNROOF: return "CMD_CLOSE_SUNROOF";
     case CMD_TILT_SUNROOF: return "CMD_TILT_SUNROOF";
@@ -503,21 +567,21 @@ void rollWindowDown(int doorNum = 1, int ms = WINDOW_UPDOWN_DELAY) {
   int upPin, downPin;
 
   if (doorNum == 1) {
-    upPin = DOOR1_WINUP_RELAY;
-    downPin = DOOR1_WINDWN_RELAY;
+    upPin = P0;
+    downPin = P1;
   } else if (doorNum == 2) {
-    upPin = DOOR2_WINUP_RELAY;
-    downPin = DOOR2_WINDWN_RELAY;
+    upPin = P2;
+    downPin = P3;
   } else {
     Serial.println("Unrecognized door.");
     return;
   }
 
   Serial.print("Rolling window " + String(doorNum) + " down...");
-  digitalWrite(upPin, false);
-  digitalWrite(downPin, true);
+  pcf8575.digitalWrite(upPin, HIGH);
+  pcf8575.digitalWrite(downPin, LOW);
   delay(ms);
-  digitalWrite(downPin, false);
+  pcf8575.digitalWrite(downPin, HIGH);
   Serial.println(F("done."));
 }
 
@@ -525,28 +589,30 @@ void rollWindowUp(int doorNum = 1, int ms = WINDOW_UPDOWN_DELAY) {
   int upPin, downPin;
 
   if (doorNum == 1) {
-    upPin = DOOR1_WINUP_RELAY;
-    downPin = DOOR1_WINDWN_RELAY;
+    upPin = P0;
+    downPin = P1;
   } else if (doorNum == 2) {
-    upPin = DOOR2_WINUP_RELAY;
-    downPin = DOOR2_WINDWN_RELAY;
+    upPin = P2;
+    downPin = P3;
   } else {
     Serial.println(F("Unrecognized door."));
     return;
   }
 
   Serial.print("Rolling window " + String(doorNum) + " up...");
-  digitalWrite(downPin, false);
-  digitalWrite(upPin, true);
+  pcf8575.digitalWrite(downPin, HIGH);
+  pcf8575.digitalWrite(upPin, LOW);
   delay(ms);
-  digitalWrite(upPin, false);
+  pcf8575.digitalWrite(upPin, HIGH);
   Serial.println(F("done."));
 }
 
 void ventWindow(int doorNum = 1, int ms = WINDOW_VENT_DELAY) {
   Serial.print("Venting window " + String(doorNum) + "...");
   rollWindowUp(doorNum);
-  delay(1000);
+  delay(100);
+  Serial.print("delay: ");
+  Serial.println(ms);
   rollWindowDown(doorNum, ms);
   Serial.println(F("done."));
 }
@@ -562,8 +628,43 @@ void toggleWindow(int doorNum = 1) {
   isWindowDown = !isWindowDown;
 }
 
+void honk() {
+  int hornPin = P4;
+  Serial.print("Honking horn...");
+  pcf8575.digitalWrite(hornPin, HIGH);
+  pcf8575.digitalWrite(hornPin, LOW);
+  delay(100);
+  pcf8575.digitalWrite(hornPin, HIGH);
+  delay(100);
+  pcf8575.digitalWrite(hornPin, LOW);
+  delay(100);
+  pcf8575.digitalWrite(hornPin, HIGH);
+  Serial.println(F("done."));
+}
+
+void flashLights() {
+  int lightsPin = P5;
+  Serial.print("Flashing lights...");
+  pcf8575.digitalWrite(lightsPin, HIGH);
+  for(int i = 0; i < 5; i++) {
+    pcf8575.digitalWrite(lightsPin, LOW);
+    delay(200);
+    pcf8575.digitalWrite(lightsPin, HIGH);
+    delay(200);
+  }
+  Serial.println(F("done."));
+}
+
+void updateState() {
+  
+}
+
 void processCommand(Command cmd) {
   switch (cmd.id) {
+    case CMD_READ_DATA:
+      updateState();
+      break;
+      
     case CMD_ROLL_WINDOWS_DOWN:
       rollWindowDown(getDoorNumFromCommandParams(cmd));
       break;
@@ -578,6 +679,14 @@ void processCommand(Command cmd) {
 
     case CMD_VENT_WINDOWS:
       ventWindow(getDoorNumFromCommandParams(cmd));
+      break;
+
+    case CMD_HONK:
+      honk();
+      break;
+
+    case CMD_FLASH_LIGHTS:
+      flashLights();
       break;
   }
 }
